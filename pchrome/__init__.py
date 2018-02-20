@@ -27,6 +27,19 @@ import os, sys
 from cefpython3 import cefpython
 from panda3d.core import CardMaker, Texture, NodePath
 from direct.directnotify.DirectNotify import DirectNotify
+import direct.stdpy.file
+import base64
+
+
+def create_uri_from_file(path):
+    """
+    Creates a base64 uri for loading a html file from the vfs
+    """
+    html = open(path).read()
+    html = html.encode('utf-8', 'replace')
+    b64 = base64.b64encode(html).decode('utf-8', 'replace')
+    uri = 'data:text/html;base64,%s' % b64
+    return uri
 
 class PandaChromiumManager(object):
     """
@@ -104,6 +117,7 @@ class CEFClientHandler(object):
     """
     A custom client handler for CEFPython that processes callbacks from the browser to Panda
     """
+    notify = DirectNotify().newCategory('PandaChromiumManager')
 
     def __init__(self, browser, texture):
         self._browser = browser
@@ -136,9 +150,9 @@ class CEFClientHandler(object):
     def OnLoadEnd(self, browser, frame, http_code):
         return
 
-    def OnLoadError(self, browser, frame, errorCode, errorText, failedURL):
+    def OnLoadError(self, browser, frame, error_code, error_text_out, failed_url):
         raise CEFClientException('Failed to load; %s %s %s %s %s'
-            % (browser, frame, errorCode, errorText, failedURL))
+            % (browser, frame, error_code, error_text_out, failed_url))
 
 class ChromiumTexture(Texture):
     """
@@ -168,6 +182,7 @@ class ChromiumTexture(Texture):
             window_handle = base.win.getWindowHandle().getIntHandle()
         window_info = cefpython.WindowInfo()
         window_info.SetAsOffscreen(window_handle)
+        window_info.SetTransparentPainting(True)
 
         # Initialize browser
         self._browser = cefpython.CreateBrowserSync(window_info, browser_settings, navigateUrl=navigation_url)
@@ -200,25 +215,45 @@ class ChromiumTexture(Texture):
         if self._browser:
             self._browser.WasResized()
 
+    @classmethod
+    def load_from_file(cls, path, window_handle=None, browser_settings=None):
+        """
+        Loads a HTML file into the texture from the VirtualFileSystem
+        """
+        uri = create_uri_from_file(path)
+        return cls(navigation_url=uri, window_handle=window_handle, browser_settings=browser_settings)
+
 class ChromiumNode(NodePath):
     """
     Custom Panda3D Node that contains a card for displaying a browser
     """
+    notify = DirectNotify().newCategory('ChromiumNode')
 
-    def __init__(self, name=None, naivgation_url=None, browser_settings=None):
+    def __init__(self, name=None, navigation_url=None, browser_settings=None):
 
         if name is None:
             name = self.__class__.__name__
         NodePath.__init__(self, name)
-        self._chrome_texture = ChromiumTexture('%s-ChromiumBrowserTexture' % name, navigation_url=naivgation_url, browser_settings=browser_settings)
+
+        self._chrome_texture = ChromiumTexture('%s-ChromiumBrowserTexture' % name, navigation_url=navigation_url, browser_settings=browser_settings)
 
         card_maker = CardMaker('chromebrowser2d')
         card_maker.set_frame(-0.75, 0.75, -0.75, 0.75)
-        self._card = self.attach_new_node(card_maker.generate())
+        self._card = self.attach_new_node(card_maker.generate())        
         self._card.set_texture(self._chrome_texture)
-
+        
+    @property
     def chrome_texture(self):
         return self._chrome_texture
 
+    @property
     def card(self):
         return self._card
+
+    @classmethod
+    def load_from_file(cls, path, name=None, browser_settings=None):
+        """
+        Loads a HTML file into the texture used by the ChromiumNode
+        """
+        uri = create_uri_from_file(path)
+        return cls(name=name, navigation_url=uri, browser_settings=browser_settings)
